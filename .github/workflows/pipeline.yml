@@ -1,0 +1,23 @@
+- name: 📈 系统健康趋势看板 (L4.5 Observation)
+        if: always()
+        run: |
+          echo "### 🏭 工厂运行趋势 (最近 7 次)" >> $GITHUB_STEP_SUMMARY
+          
+          # 提取最近运行的指标，不进行逻辑判定，仅展示
+          STATS=$(tail -n 7 run_history.jsonl | jq -s '
+            {
+              fallback_rate: (map(select(.fallback_used == true)) | length),
+              avg_retries: (map(.retry_count) | add / length),
+              unique_fingerprints: (map(.semantic_fingerprint) | unique | length)
+            }')
+          
+          FB_COUNT=$(echo $STATS | jq '.fallback_rate')
+          UNIQUE_FP=$(echo $STATS | jq '.unique_fingerprints')
+
+          echo "| 观察维度 | 当前值 | 评估 |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| 降级频次 (7日) | $FB_COUNT | ${FB_COUNT >= 3 && '⚠️ 注意' || '✅ 正常'} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 语义稳定性 (3日) | $UNIQUE_FP/3 | ${UNIQUE_FP < 2 && '⚠️ 可能存在循环' || '✅ 正常'} |" >> $GITHUB_STEP_SUMMARY
+          
+          echo " " >> $GITHUB_STEP_SUMMARY
+          echo "> 💡 **提示**: 当前处于观察期，系统不会自动熔断。若降级频次持续走高，请手动检查 API 状态。" >> $GITHUB_STEP_SUMMARY
