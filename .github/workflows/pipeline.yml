@@ -1,44 +1,92 @@
-- name: 📈 运行趋势看板 (L4.5 终极硬化版)
-  if: always()
-  shell: bash
-  run: |
-   set +e
-   FILE="run_history.jsonl"
-   echo "### 🏭 工厂运行趋势 (最近 7 次分析)" >> $GITHUB_STEP_SUMMARY
+name: 🏭 AI Production Factory (Hardened Edition)
 
-   # 1. 冷启动拦截
-   if [ ! -s "$FILE" ]; then
-    echo "> ⚠️ 暂无历史数据。系统将在下一次成功运行后自动生成看板。" >> $GITHUB_STEP_SUMMARY
-    exit 0
-   fi
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每天北京时间 10:00 自动点火
+  workflow_dispatch:      # 允许你随时手动点按钮运行
 
-   # 2. 数据清洗与硬化 (过滤非法 JSON)
-   RAW_7=$(tail -n 7 "$FILE")
-   SAFE_7=$(echo "$RAW_7" | jq -c . 2>/dev/null || echo "")
+# 给机器人赋予“写文件”的权利
+permissions:
+  contents: write
 
-   # 3. 基础指标抓取 (0 算术)
-   RUN_COUNT=$(echo "$SAFE_7" | wc -l | xargs)
-   FB_TOTAL=$(echo "$SAFE_7" | jq -s '[.[] | select(.fallback_used == true)] | length // 0')
-   RETRY_TOTAL=$(echo "$SAFE_7" | jq -s 'map(.retry_count // 0) | add // 0')
+# 防止多任务冲突
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
-   # 4. 趋势判断逻辑 (对比最近 3 次 vs 前 3 次，无除法)
-   NEW_3=$(echo "$SAFE_7" | tail -n 3)
-   NEW_RETRY=$(echo "$NEW_3" | jq -s 'map(.retry_count // 0) | add // 0')
-   OLD_3=$(echo "$SAFE_7" | head -n -3 | tail -n 3)
-   OLD_RETRY=$(echo "$OLD_3" | jq -s 'map(.retry_count // 0) | add // 0')
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 检出代码
+        uses: actions/checkout@v4
 
-   # 趋势箭头逻辑
-   TREND="➖"
-   if [ "$NEW_RETRY" -gt "$OLD_RETRY" ]; then TREND="📈 波动上升"; fi
-   if [ "$NEW_RETRY" -lt "$OLD_RETRY" ]; then TREND="📉 趋于平稳"; fi
+      - name: 🐍 准备 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-   # 5. 纯展示看板
-   echo "| 观察维度 | 数值 (7日累积) | 状态/趋势 |" >> $GITHUB_STEP_SUMMARY
-   echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-   echo "| **总运行次数** | $RUN_COUNT | 🟢 Active |" >> $GITHUB_STEP_SUMMARY
-   echo "| **降级触发 (Fallback)** | $FB_TOTAL | $([ $FB_TOTAL -eq 0 ] && echo '🟢 良好' || echo '🟡 需关注') |" >> $GITHUB_STEP_SUMMARY
-   echo "| **重试压力趋势** | $RETRY_TOTAL | $TREND |" >> $GITHUB_STEP_SUMMARY
+      - name: 📦 安装依赖
+        run: pip install requests beautifulsoup4
 
-   echo " " >> $GITHUB_STEP_SUMMARY
-   echo "> 💡 **运维提示**: 趋势基于最近 3 次运行与前 3 次的对比。若重试持续上升，请检查 API 稳定性。" >> $GITHUB_STEP_SUMMARY
-   exit 0
+      - name: 🤖 执行 AI 核心逻辑
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+        run: |
+          # 这里执行你的爬虫和总结脚本
+          python crawler.py
+          python summarize.py
+
+      - name: 💾 自动存入历史记录
+        if: always()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add run_history.jsonl
+          git commit -m "chore: update run history [skip ci]" || echo "No changes to commit"
+          git push
+
+      - name: 📈 运行趋势看板 (L4.5 终极硬化版)
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          FILE="run_history.jsonl"
+          echo "### 🏭 工厂运行趋势 (最近 7 次分析)" >> $GITHUB_STEP_SUMMARY
+
+          # 1. 冷启动拦截
+          if [ ! -s "$FILE" ]; then
+            echo "> ⚠️ 暂无历史数据。系统将在下一次成功运行后自动生成看板。" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # 2. 数据清洗与硬化
+          RAW_7=$(tail -n 7 "$FILE")
+          SAFE_7=$(echo "$RAW_7" | jq -c . 2>/dev/null || echo "")
+
+          # 3. 指标统计
+          RUN_COUNT=$(echo "$SAFE_7" | wc -l | xargs)
+          FB_TOTAL=$(echo "$SAFE_7" | jq -s '[.[] | select(.fallback_used == true)] | length // 0')
+          RETRY_TOTAL=$(echo "$SAFE_7" | jq -s 'map(.retry_count // 0) | add // 0')
+
+          # 4. 0 算术趋势判断
+          NEW_3=$(echo "$SAFE_7" | tail -n 3)
+          NEW_RETRY=$(echo "$NEW_3" | jq -s 'map(.retry_count // 0) | add // 0')
+          OLD_3=$(echo "$SAFE_7" | head -n -3 | tail -n 3)
+          OLD_RETRY=$(echo "$OLD_3" | jq -s 'map(.retry_count // 0) | add // 0')
+
+          TREND="➖"
+          if [ "$NEW_RETRY" -gt "$OLD_RETRY" ]; then TREND="📈 波动上升"; fi
+          if [ "$NEW_RETRY" -lt "$OLD_RETRY" ]; then TREND="📉 趋于平稳"; fi
+
+          # 5. 生成看板表格
+          echo "| 观察维度 | 数值 (7日累积) | 状态/趋势 |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **总运行次数** | $RUN_COUNT | 🟢 Active |" >> $GITHUB_STEP_SUMMARY
+          echo "| **降级触发 (Fallback)** | $FB_TOTAL | $([ $FB_TOTAL -eq 0 ] && echo '🟢 良好' || echo '🟡 需关注') |" >> $GITHUB_STEP_SUMMARY
+          echo "| **重试压力趋势** | $RETRY_TOTAL | $TREND |" >> $GITHUB_STEP_SUMMARY
+
+          echo " " >> $GITHUB_STEP_SUMMARY
+          echo "> 💡 **运维提示**: 趋势基于最近 3 次运行与前 3 次的对比。若重试持续上升，请检查 API 稳定性。" >> $GITHUB_STEP_SUMMARY
+          exit 0
