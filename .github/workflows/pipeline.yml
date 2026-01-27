@@ -24,9 +24,15 @@ jobs:
             exit 0
           fi
 
-          COUNT=$(tail -n 7 run_history.jsonl | wc -l)
-          FALLBACK_COUNT=$(tail -n 7 run_history.jsonl | jq -s '[.[] | select(.fallback_used == true)] | length')
-          UNIQUE_FP=$(tail -n 7 run_history.jsonl | jq -s '[.[] | .semantic_fingerprint] | unique | length')
+          COUNT=$(tail -n 7 run_history.jsonl | wc -l | tr -d ' ')
+
+          if [ "$COUNT" -eq 0 ]; then
+            FALLBACK_COUNT=0
+            UNIQUE_FP=0
+          else
+            FALLBACK_COUNT=$(tail -n 7 run_history.jsonl | jq -s '[.[] | select(.fallback_used == true)] | length')
+            UNIQUE_FP=$(tail -n 7 run_history.jsonl | jq -s '[.[] | .semantic_fingerprint] | unique | length')
+          fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| 指标 | 数值 |" >> $GITHUB_STEP_SUMMARY
