@@ -1,4 +1,4 @@
-name: 🏭 系统健康趋势看板（L4.5 Observation）
+name: 🧱 系统健康趋势看板（L4.5 Observation）
 
 on:
   workflow_dispatch:
@@ -8,28 +8,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout repo
+      - name: 📦 Checkout repo
         uses: actions/checkout@v4
 
-      - name: 🧮 生成运行趋势摘要
-        shell: bash
+      - name: 📊 生成运行趋势摘要（安全模式）
+        if: always()
         run: |
           echo "### 🏭 工厂运行趋势（最近 7 次）" >> $GITHUB_STEP_SUMMARY
 
-          STATS=$(tail -n 7 run_history.jsonl | jq -s '
-            {
-              fallback_rate: (map(select(.fallback_used == true)) | length),
-              avg_retries: (map(.retry_count) | add / length),
-              unique_fingerprints: (map(.semantic_fingerprint) | unique | length)
-            }')
+          if [ ! -s run_history.jsonl ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ 当前暂无历史运行数据（首次运行属正常情况）" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "系统将在下一次运行后开始生成趋势统计。" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
 
-          FB_COUNT=$(echo $STATS | jq '.fallback_rate')
-          UNIQUE_FP=$(echo $STATS | jq '.unique_fingerprints')
-
-          echo "| 观察维度 | 当前值 | 评估 |" >> $GITHUB_STEP_SUMMARY
-          echo "| --- | --- | --- |" >> $GITHUB_STEP_SUMMARY
-          echo "| 降级频次（7日） | $FB_COUNT | $( [ $FB_COUNT -ge 3 ] && echo '⚠️ 注意' || echo '✅ 正常' ) |" >> $GITHUB_STEP_SUMMARY
-          echo "| 语义稳定性（7日） | $UNIQUE_FP/3 | $( [ $UNIQUE_FP -lt 2 ] && echo '⚠️ 可能存在循环' || echo '✅ 正常' ) |" >> $GITHUB_STEP_SUMMARY
+          COUNT=$(tail -n 7 run_history.jsonl | wc -l)
+          FALLBACK_COUNT=$(tail -n 7 run_history.jsonl | jq -s '[.[] | select(.fallback_used == true)] | length')
+          UNIQUE_FP=$(tail -n 7 run_history.jsonl | jq -s '[.[] | .semantic_fingerprint] | unique | length')
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "💡 **提示**：当前处于观察期，系统不会自动熔断。若降级频次持续走高，请手动检查。" >> $GITHUB_STEP_SUMMARY
+          echo "| 指标 | 数值 |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| 运行次数 | ${COUNT} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 降级次数 | ${FALLBACK_COUNT} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 语义指纹数 | ${UNIQUE_FP} |" >> $GITHUB_STEP_SUMMARY
